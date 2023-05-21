@@ -1,0 +1,169 @@
+# Enable SSH
+UniFi OS > Advanced, Enable SSH
+
+
+# Extract the EAP-TLS_8021x-xxxxxxxxxxxxxxx.tar.gz file
+# Open EAP-TLS_8021x-xxxxxxxxxxxxxxx folder
+
+
+# WinSCP the *.pem files  &&  the wpa_supplicant.conf file over to the UDM Pro on /tmp
+scp -r *.pem root@UDM_IP_ADDR:/tmp/
+scp -r wpa_supplicant.conf root@UDM_IP_ADDR:/tmp/
+
+
+# Log into UDM Pro SE
+ssh root@UDM_IP_ADDR
+
+# make directory
+mkdir -p /mnt/data/podman/wpa_supplicant/
+
+# copy files
+cp -arfv /tmp/*pem /tmp/wpa_supplicant.conf /mnt/data/podman/wpa_supplicant/
+
+# Update wpa_supplicant.conf with correct *.pem paths
+sed -i 's,ca_cert=",ca_cert="/etc/wpa_supplicant/conf/,g' /mnt/data/podman/wpa_supplicant/wpa_supplicant.conf
+sed -i 's,client_cert=",client_cert="/etc/wpa_supplicant/conf/,g' /mnt/data/podman/wpa_supplicant/wpa_supplicant.conf
+sed -i 's,private_key=",private_key="/etc/wpa_supplicant/conf/,g' /mnt/data/podman/wpa_supplicant/wpa_supplicant.conf
+
+
+# Need to install podman
+vi /etc/systemd/system/udm-boot.service
+########### PASTE BELOW ###########
+[Unit]
+Description=Run On Startup UDM
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=forking
+ExecStart=bash -c 'mkdir -p /mnt/data/on_boot.d && find -L /mnt/data/on_boot.d -mindepth 1 -maxdepth 1 -type f -print0 | sort -z | xargs -0 -r -n 1 -- bash -c \'if test -x "$0"; then echo "%n: running $0"; "$0"; else case "$0" in *.sh) echo "%n: sourcing $0"; . "$0";; *) echo "%n: ignoring $0";; esac; fi\''
+
+[Install]
+WantedBy=multi-user.target
+########### PASTE ABOVE ###########
+
+
+systemctl daemon-reload
+systemctl enable udm-boot
+systemctl start udm-boot
+
+# Check udm-boot works
+vi /mnt/data/on_boot.d/helloWorld.sh
+########### PASTE BELOW ###########
+#!/bin/bash
+echo helloWorld >> /mnt/data/test
+########### PASTE ABOVE ###########
+
+
+chmod +x /mnt/data/on_boot.d/helloWorld.sh
+cat /mnt/data/test
+systemctl restart udm-boot
+cat /mnt/data/test
+
+rm -f /mnt/data/test
+rm -f /mnt/data/on_boot.d/helloWorld.sh
+
+# OLD URL: https://github.com/boostchicken-dev/udm-utilities/actions/workflows/podman-udmse.yml
+# NEW URL for UDMSE/UDM Pro: https://github.com/unifi-utilities/unifios-utilities/actions/workflows/podman-udmp-udmse.yml
+# NEW URL for UDM: https://github.com/unifi-utilities/unifios-utilities/actions/workflows/podman-udm.yml
+# Fork the repo
+# Enable Actions
+# Run Action of UDM_SE Podman and wait ~5 minutes to complete.
+# Unzip udm(se)-podman-install.zip
+# copy podman-udm(se).zip to /
+
+scp podman-install.zip to /
+cd /
+unzip podman-install.zip
+	# After updating UniFiOS, rerun the unzip command and set up the docker again.
+	
+
+
+# Transfer 2 Files below from our Downloads folder to the UDM-SE
+cp storage.conf /etc/containers/storage.conf
+cp policy.json /etc/containers/policy.json
+
+
+vi /etc/containers/registries.conf
+########### PASTE BELOW ###########
+unqualified-search-registries=["docker.io"]
+########### PASTE ABOVE ###########
+
+
+# Install CNI (Container Network Interface) Plug-Ins
+cd /mnt/data/on_boot.d
+curl -o /mnt/data/on_boot.d/05-install-cni-plugins.sh https://raw.githubusercontent.com/boostchicken/udm-utilities/master/cni-plugins/05-install-cni-plugins.sh
+chmod +x /mnt/data/on_boot.d/05-install-cni-plugins.sh
+/mnt/data/on_boot.d/05-install-cni-plugins.sh
+
+
+# Test podman
+podman version
+podman info
+
+
+
+# Run pre-built container for UDMSE/UDM Pro
+podman run --privileged --network=host --name=wpa_supplicant-udmpro -v /mnt/data/podman/wpa_supplicant/:/etc/wpa_supplicant/conf/ --log-driver=k8s-file --restart always -d -ti pbrah/wpa_supplicant-udmpro:v1.0 -Dwired -ieth8 -c/etc/wpa_supplicant/conf/wpa_supplicant.conf
+
+# Run pre-built container for UDM
+podman run --privileged --network=host --name=wpa_supplicant-udm -v /mnt/data/podman/wpa_supplicant/:/etc/wpa_supplicant/conf/ --log-driver=k8s-file --restart always -d -ti pbrah/wpa_supplicant-udmpro:v1.0 -Dwired -ieth4 -c/etc/wpa_supplicant/conf/wpa_supplicant.conf
+
+
+
+############ OR ############
+
+# Create local docker files
+cd /mnt/data/podman/wpa_supplicant/
+vi /mnt/data/podman/wpa_supplicant/Dockerfile
+########### PASTE BELOW ###########
+FROM alpine
+RUN apk add --no-cache wpa_supplicant
+ENTRYPOINT ["wpa_supplicant"]
+CMD []
+########### PASTE ABOVE ###########
+
+podman build --network=host -t Your_Name/wpa_supplicant-udmpro:v1.0 .
+podman images | grep udmpro
+
+# Run custom container for UDMSE/UDM Pro
+podman run --privileged --network=host --name=wpa_supplicant-udmpro -v /mnt/data/podman/wpa_supplicant/:/etc/wpa_supplicant/conf/ --log-driver=k8s-file --restart always -d -ti localhost/YourName/wpa_supplicant-udmpro:v1.0 -Dwired -ieth8 -c/etc/wpa_supplicant/conf/wpa_supplicant.conf
+# Run custom container for UDM
+podman run --privileged --network=host --name=wpa_supplicant-udm -v /mnt/data/podman/wpa_supplicant/:/etc/wpa_supplicant/conf/ --log-driver=k8s-file --restart always -d -ti localhost/YourName/wpa_supplicant-udmpro:v1.0 -Dwired -ieth4 -c/etc/wpa_supplicant/conf/wpa_supplicant.conf
+
+
+
+## Create persistence script
+vi /mnt/data/on_boot.d/10-wpa_supplicant.sh
+########### PASTE BELOW ###########
+#!/bin/sh
+# Use for UDMSE/UDM Pro
+podman start wpa_supplicant-udmpro
+# Use for UDM
+podman start wpa_supplicant-udm
+########### PASTE ABOVE ###########
+
+# Make script executable
+chmod +x /mnt/data/on_boot.d/10-wpa_supplicant.sh
+
+podman ps
+
+podman logs -f wpa_supplicant-udmpro    # For UDMSE/UDM Pro
+podman logs -f wpa_supplicant-udm       # For UDM
+	Successfully initialized wpa_supplicant
+	eth8: Associated with XX:XX:XX:XX:XX:XX
+	eth8: CTRL-EVENT-SUBNET-STATUS-UPDATE status=0
+	...
+	eth8: CTRL-EVENT-EAP-SUCCESS EAP authentication completed successfully
+
+reboot
+
+
+
+#########################################################
+#                                                       #
+# 06/01/2022 Notes:                                     #
+# If updating UniFi OS, will need to re-unzip Podman &  #
+# Run Podman Pre-built Container                        #
+#                                                       #
+#########################################################
